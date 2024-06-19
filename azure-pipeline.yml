@@ -1,0 +1,73 @@
+trigger: 
+  - main
+
+resources:
+  - repo: self
+  
+variables:
+  tag: '$(Build.BuildId)'
+  azureSubscription: 'aks'
+  acrName: 'ithevax'
+  imageRepository: 'springboot-app'
+  dockerfilePath: '**/Dockerfile'
+  k8sNamespace: 'default'
+  appName: 'springboot-app'
+
+stages:
+- stage: Build
+  displayName: Build Image
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      name: Default
+    steps:
+    - task: Maven@4
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: 'install'
+        publishJUnitResults: true
+        testResultsFiles: '**/surefire-reports/TEST-*.xml'
+        javaHomeOption: 'JDKVersion'
+        mavenVersionOption: 'Default'
+        mavenAuthenticateFeed: false
+        effectivePomSkip: false
+        sonarQubeRunAnalysis: false
+
+    - task: Docker@0
+      displayName: 'Build an Image'
+      inputs:
+        azureSubscription: 'ACR-Connection'
+        azureContainerRegistry: '{"loginServer":"ithevax.azurecr.io", "id" : "/subscriptions/e25c0a93-619e-4b0f-8713-ada2c8e89425/resourceGroups/divyanshumishra/providers/Microsoft.ContainerRegistry/registries/ithevax"}'
+        includeLatestTag: true
+
+    - task: Docker@0
+      displayName: 'Push an Image'
+      inputs:
+        azureSubscription: 'ACR-Connection'
+        azureContainerRegistry: '{"loginServer":"ithevax.azurecr.io", "id" : "/subscriptions/e25c0a93-619e-4b0f-8713-ada2c8e89425/resourceGroups/divyanshumishra/providers/Microsoft.ContainerRegistry/registries/ithevax"}'
+        action: 'Push an image'
+        includeLatestTag: true
+        
+    - task: CopyFiles@2
+      displayName: 'Copy aksdeploy.yaml to: $(Build.ArtifactStagingDirectory)'
+      inputs:
+        SourceFolder: '$(System.DefaultWorkingDirectory)'
+        Contents: 'aksdeploy.yaml'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+      condition: succeededOrFailed()
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Artifact: drop'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+      condition: succeededOrFailed()
+
+    - task: Kubernetes@0
+      displayName: 'kubectl apply'
+      inputs:
+        kubernetesServiceConnection: 'k8sconnect' 
+        namespace: $(k8sNamespace)
+        command: apply
+        useConfigurationFile: true
+        configuration: '$(Build.SourcesDirectory)/aksdeploy.yaml' 
